@@ -352,6 +352,7 @@ async def build_image(
     user_api_key: Optional[str] = None,
     intent_only: bool = False,
     colors: int = 2,
+    render_opts: Optional[dict] = None,
 ):
     from core.mode_registry import get_registry
 
@@ -926,6 +927,7 @@ async def build_image(
             screen_h=screen_h,
             mac=mac or "",
             colors=colors,
+            render_opts=render_opts,
         )
         if isinstance(content_data, dict):
             logger.debug(

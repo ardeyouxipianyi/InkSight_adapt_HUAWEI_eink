@@ -54,20 +54,52 @@ def enhance_photo_for_eink(rgb: Image.Image) -> Image.Image:
     return img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=80, threshold=3))
 
 
+def apply_eink_adjustments(
+    rgb: Image.Image,
+    *,
+    contrast: float = 1.0,
+    brightness: float = 1.0,
+    saturation: float = 1.0,
+) -> Image.Image:
+    """Per-device image tuning applied before quantization (1.0 means no change)."""
+    img = rgb.convert("RGB")
+    if contrast != 1.0:
+        img = ImageEnhance.Contrast(img).enhance(contrast)
+    if brightness != 1.0:
+        img = ImageEnhance.Brightness(img).enhance(brightness)
+    if saturation != 1.0:
+        img = ImageEnhance.Color(img).enhance(saturation)
+    return img
+
+
 def quantize_image_for_eink(
     rgb: Image.Image,
     *,
     colors: int,
     photo_enhance: bool = False,
+    dither: str = "atkinson",
+    contrast: float = 1.0,
+    brightness: float = 1.0,
+    saturation: float = 1.0,
 ) -> Image.Image:
-    """Quantize RGB image data for 2-, 3-, or 4-color e-ink output with Atkinson dithering."""
+    """Quantize RGB image data for 2-, 3-, or 4-color e-ink output.
+
+    ``dither`` is "atkinson" (default), "floyd" or "none"; the contrast/brightness/saturation
+    factors are applied first, so they take effect before the error diffusion.
+    """
     prepared = enhance_photo_for_eink(rgb) if photo_enhance else rgb.convert("RGB")
+    prepared = apply_eink_adjustments(
+        prepared,
+        contrast=contrast,
+        brightness=brightness,
+        saturation=saturation,
+    )
 
     if colors < 3:
         gray = ImageOps.autocontrast(prepared.convert("L"), cutoff=1)
-        return native_dither.atkinson_bw(gray)
+        return native_dither.dither_bw(gray, dither)
 
-    return native_dither.atkinson_palette(prepared, 3 if colors == 3 else 4)
+    return native_dither.dither_palette(prepared, 3 if colors == 3 else 4, dither)
 
 
 def convert_image_block(
@@ -80,6 +112,10 @@ def convert_image_block(
     align_x: str = "center",
     align_y: str = "center",
     photo_enhance: bool = False,
+    dither: str = "atkinson",
+    contrast: float = 1.0,
+    brightness: float = 1.0,
+    saturation: float = 1.0,
 ) -> Image.Image:
     """Fit and quantize an image for a JSON image block."""
     fitted = fit_image_to_box(src, width, height, fit=fit, align_x=align_x, align_y=align_y)
@@ -87,4 +123,8 @@ def convert_image_block(
         fitted,
         colors=colors,
         photo_enhance=photo_enhance,
+        dither=dither,
+        contrast=contrast,
+        brightness=brightness,
+        saturation=saturation,
     )

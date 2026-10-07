@@ -92,6 +92,7 @@ async def generate_and_render(
     screen_h: int = SCREEN_HEIGHT,
     mac: str = "",
     colors: int = 2,
+    render_opts: dict | None = None,
 ) -> tuple[Image.Image, dict | None]:
     """Generate content for a persona and render to an e-ink image.
 
@@ -134,6 +135,7 @@ async def generate_and_render(
         mac=mac or "",
         colors=colors,
         language=_eff_lang,
+        render_opts=render_opts,
     )
     return img, content
 
@@ -307,6 +309,7 @@ async def _render_for_persona(
     mac: str = "",
     colors: int = 2,
     language: str = "zh",
+    render_opts: dict | None = None,
 ) -> Image.Image:
     """Dispatch rendering to the appropriate handler."""
     from .mode_registry import get_registry
@@ -331,6 +334,7 @@ async def _render_for_persona(
             weather_code=weather_code_for_bar, time_str=time_str,
             screen_w=screen_w, screen_h=screen_h, colors=colors,
             language=language,
+            render_opts=render_opts,
         )
 
     return render_mode(

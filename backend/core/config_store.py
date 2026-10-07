@@ -65,6 +65,14 @@ async def init_db():
                 focus_listening INTEGER DEFAULT 0,
                 always_active INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
+                screen_width INTEGER DEFAULT 0,
+                screen_height INTEGER DEFAULT 0,
+                dither_algo TEXT DEFAULT 'atkinson',
+                contrast REAL DEFAULT 1.0,
+                brightness REAL DEFAULT 1.0,
+                saturation REAL DEFAULT 1.0,
+                ink_screen TEXT DEFAULT 'A1',
+                wifi_list TEXT DEFAULT '[]',
                 created_at TEXT NOT NULL
             )
         """)
@@ -156,6 +164,15 @@ async def init_db():
             "timezone": "TEXT DEFAULT ''",
             "admin1": "TEXT DEFAULT ''",
             "country": "TEXT DEFAULT ''",
+            # 屏幕设置（设备级渲染参数）
+            "screen_width": "INTEGER DEFAULT 0",
+            "screen_height": "INTEGER DEFAULT 0",
+            "dither_algo": "TEXT DEFAULT 'atkinson'",
+            "contrast": "REAL DEFAULT 1.0",
+            "brightness": "REAL DEFAULT 1.0",
+            "saturation": "REAL DEFAULT 1.0",
+            "ink_screen": "TEXT DEFAULT 'A1'",
+            "wifi_list": "TEXT DEFAULT '[]'",
         }
         try:
             cursor = await db.execute("PRAGMA table_info(configs)")
@@ -1503,8 +1520,11 @@ async def save_config(mac: str, data: dict) -> int:
            (mac, nickname, modes, refresh_strategy, character_tones,
             language, mode_language, content_tone, city, latitude, longitude, timezone, admin1, country,
             refresh_interval, llm_provider, llm_model, image_provider, image_model,
-            countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active,
+            screen_width, screen_height, dither_algo, contrast, brightness, saturation, ink_screen, wifi_list,
+            created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             mac,
             data.get("nickname", ""),
@@ -1531,6 +1551,14 @@ async def save_config(mac: str, data: dict) -> int:
             mode_overrides_json,
             1 if bool(data.get("is_focus_listening", False)) else 0,
             always_active,
+            int(data.get("screen_width") or data.get("screenWidth") or 0),
+            int(data.get("screen_height") or data.get("screenHeight") or 0),
+            str(data.get("dither_algo") or "atkinson"),
+            float(data.get("contrast") if data.get("contrast") is not None else 1.0),
+            float(data.get("brightness") if data.get("brightness") is not None else 1.0),
+            float(data.get("saturation") if data.get("saturation") is not None else 1.0),
+            str(data.get("inkScreen") or data.get("ink_screen") or "A1"),
+            json.dumps(data.get("wifiList") or data.get("wifi_list") or [], ensure_ascii=False),
             now,
         ),
     )

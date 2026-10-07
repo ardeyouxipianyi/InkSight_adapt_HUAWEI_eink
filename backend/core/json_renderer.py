@@ -37,6 +37,7 @@ from .patterns.utils import (
 )
 from .layout_presets import expand_layout_presets
 from .mode_catalog import builtin_catalog_map
+from . import native_dither
 from .image_processing import convert_image_block
 
 logger = logging.getLogger(__name__)
@@ -171,6 +172,11 @@ class RenderContext:
     footer_height: int = 30
     colors: int = 2
     footer_top_offset: int = 0
+    # Per-device image pipeline options (see 屏幕设置 in the web config page).
+    dither_algo: str = "atkinson"
+    contrast: float = 1.0
+    brightness: float = 1.0
+    saturation: float = 1.0
 
     @property
     def scale(self) -> float:
@@ -1078,6 +1084,26 @@ def _paint_component_node(ctx: RenderContext, node: ComponentNode, theme: dict, 
         )
 
 
+def _normalize_render_opts(render_opts: Optional[dict]) -> dict:
+    """Normalize the per-device image pipeline options into concrete values."""
+    opts = render_opts or {}
+    dither = native_dither.normalize_algo(opts.get("dither") or opts.get("dither_algo"))
+
+    def factor(key: str) -> float:
+        try:
+            number = float(opts.get(key))
+        except (TypeError, ValueError):
+            return 1.0
+        return number if number >= 0.0 else 1.0
+
+    return {
+        "dither": dither,
+        "contrast": factor("contrast"),
+        "brightness": factor("brightness"),
+        "saturation": factor("saturation"),
+    }
+
+
 def _render_component_tree_mode(
     draw: ImageDraw.ImageDraw,
     img: Image.Image,
@@ -1091,7 +1117,9 @@ def _render_component_tree_mode(
     footer_height: int,
     footer_top_offset: int = 0,
     colors: int,
+    render_opts: Optional[dict] = None,
 ) -> RenderContext:
+    opts = _normalize_render_opts(render_opts)
     ctx = RenderContext(
         draw=draw,
         img=img,
@@ -1102,6 +1130,10 @@ def _render_component_tree_mode(
         footer_height=footer_height,
         footer_top_offset=footer_top_offset,
         colors=colors,
+        dither_algo=opts["dither"],
+        contrast=opts["contrast"],
+        brightness=opts["brightness"],
+        saturation=opts["saturation"],
     )
     scale = _component_tree_scale(ctx, theme)
     root = _build_component_node(body_tree, content)
@@ -1246,8 +1278,18 @@ def render_json_mode(
     screen_h: int = SCREEN_HEIGHT,
     colors: int = 2,
     language: str = "zh",
+    render_opts: Optional[dict] = None,
 ) -> Image.Image:
     """Render a JSON-defined mode to an e-ink image (1-bit or 4-color palette)."""
+    _opts = _normalize_render_opts(render_opts)
+
+    def _with_opts(ctx: RenderContext) -> RenderContext:
+        ctx.dither_algo = _opts["dither"]
+        ctx.contrast = _opts["contrast"]
+        ctx.brightness = _opts["brightness"]
+        ctx.saturation = _opts["saturation"]
+        return ctx
+
     if colors >= 3:
         img = Image.new("P", (screen_w, screen_h), EINK_BG)
         pal = EINK_4COLOR_PALETTE + [0] * (768 - len(EINK_4COLOR_PALETTE))
@@ -1325,6 +1367,7 @@ def render_json_mode(
             footer_height=footer_height,
             footer_top_offset=footer_top_offset,
             colors=colors,
+            render_opts=render_opts,
         )
     else:
         body_align = layout.get("body_align", "center")
@@ -1339,6 +1382,7 @@ def render_json_mode(
                 screen_w=screen_w, screen_h=screen_h,
                 y=status_bar_bottom, footer_height=footer_height, footer_top_offset=footer_top_offset, colors=colors,
             )
+            _with_opts(ctx)
             _render_centered_text(ctx, body[0], use_full_body=True)
         elif body_align == "center" and body:
             measure_img = Image.new("1", (screen_w, screen_h), EINK_BG)
@@ -1362,6 +1406,7 @@ def render_json_mode(
                 y=status_bar_bottom + offset, footer_height=footer_height, footer_top_offset=footer_top_offset,
                 colors=colors,
             )
+            _with_opts(ctx)
             for block in body:
                 if ctx.y >= footer_top - 10:
                     break
@@ -1372,6 +1417,7 @@ def render_json_mode(
                 screen_w=screen_w, screen_h=screen_h,
                 y=status_bar_bottom, footer_height=footer_height, footer_top_offset=footer_top_offset, colors=colors,
             )
+            _with_opts(ctx)
             for block in body:
                 if ctx.y >= footer_top - 10:
                     break
@@ -2564,6 +2610,10 @@ def _render_image(ctx: RenderContext, block: dict) -> None:
             align_x=align_x,
             align_y=align_y,
             photo_enhance=photo_enhance,
+            dither=ctx.dither_algo,
+            contrast=ctx.contrast,
+            brightness=ctx.brightness,
+            saturation=ctx.saturation,
         )
         if ctx.colors >= 3:
             ctx.img.paste(img, (x, y))
@@ -2583,6 +2633,10 @@ def _render_image(ctx: RenderContext, block: dict) -> None:
                 align_x=align_x,
                 align_y=align_y,
                 photo_enhance=photo_enhance,
+                dither=ctx.dither_algo,
+                contrast=ctx.contrast,
+                brightness=ctx.brightness,
+                saturation=ctx.saturation,
             )
             if ctx.colors >= 3:
                 ctx.img.paste(img, (x, y))
@@ -2630,6 +2684,10 @@ def _render_image(ctx: RenderContext, block: dict) -> None:
             align_x=align_x,
             align_y=align_y,
             photo_enhance=photo_enhance,
+            dither=ctx.dither_algo,
+            contrast=ctx.contrast,
+            brightness=ctx.brightness,
+            saturation=ctx.saturation,
         )
         if ctx.colors >= 3:
             ctx.img.paste(img, (x, y))

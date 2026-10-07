@@ -96,6 +96,27 @@ class ConfigRequest(BaseModel):
         default=False,
         description="是否始终保持设备活跃状态",
     )
+    # ── 屏幕设置（设备级渲染参数，由 Web 配置页维护） ──────────────
+    screen_width: Optional[int] = Field(
+        default=None, ge=100, le=1600, description="屏幕宽度（像素）"
+    )
+    screen_height: Optional[int] = Field(
+        default=None, ge=100, le=1200, description="屏幕高度（像素）"
+    )
+    dither_algo: str = Field(
+        default="atkinson", max_length=32, description="图像渲染算法: atkinson / floyd / none"
+    )
+    contrast: float = Field(default=1.0, ge=0.1, le=3.0, description="对比度系数")
+    brightness: float = Field(default=1.0, ge=0.1, le=3.0, description="亮度系数")
+    saturation: float = Field(default=1.0, ge=0.0, le=3.0, description="饱和度系数")
+    inkScreen: str = Field(
+        default="A1", max_length=16, description="屏幕驱动规格: A1 原版彩显屏 / A0 兼容版"
+    )
+    wifiList: list[dict] = Field(
+        default_factory=list,
+        max_length=5,
+        description="备用 WiFi 热点列表 [{ssid, pass}]，主热点断开时设备依次尝试",
+    )
 
     @field_validator("mac")
     @classmethod
@@ -253,10 +274,18 @@ class RenderQuery(BaseModel):
     persona: Optional[str] = Field(default=None, description="Force persona")
     rssi: Optional[int] = Field(default=None, description="WiFi RSSI (dBm)")
     refresh_min: Optional[int] = Field(default=None, ge=1, le=1440, description="Device effective refresh interval in minutes")
-    w: int = Field(default=400, ge=100, le=1600, description="Screen width in pixels")
-    h: int = Field(default=300, ge=100, le=1200, description="Screen height in pixels")
+    # w/h are optional: firmware does not send them, so the device's stored screen
+    # size is used instead (see api/routes/render.py).
+    w: Optional[int] = Field(default=None, ge=100, le=1600, description="Screen width in pixels")
+    h: Optional[int] = Field(default=None, ge=100, le=1200, description="Screen height in pixels")
     next_mode: Optional[int] = Field(default=None, alias="next", description="1 = advance to next mode")
     colors: int = Field(default=2, ge=2, le=4, description="Device color capability (2=BW, 3=BWR, 4=BWRY)")
+    dither_algo: Optional[str] = Field(
+        default=None, max_length=32, description="Image dithering: atkinson / floyd / none"
+    )
+    contrast: Optional[float] = Field(default=None, ge=0.1, le=3.0, description="Contrast factor")
+    brightness: Optional[float] = Field(default=None, ge=0.1, le=3.0, description="Brightness factor")
+    saturation: Optional[float] = Field(default=None, ge=0.0, le=3.0, description="Saturation factor")
 
     @field_validator("mac")
     @classmethod

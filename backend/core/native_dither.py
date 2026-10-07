@@ -25,12 +25,30 @@ _LIB: ctypes.CDLL | None = None
 _BUILD_HINT = "run 'python3 backend/scripts/build_native_dither.py' from the repository root"
 
 # Atkinson error-diffusion kernel: (dx, dy, weight), weights expressed in eighths.
-_KERNEL = ((1, 0, 1), (2, 0, 1), (-1, 1, 1), (0, 1, 1), (1, 1, 1), (0, 2, 1))
+# Error-diffusion kernels: (steps, divisor). An empty step list means "no diffusion".
+_KERNELS: dict[str, tuple[tuple[tuple[int, int, int], ...], float]] = {
+    "atkinson": (((1, 0, 1), (2, 0, 1), (-1, 1, 1), (0, 1, 1), (1, 1, 1), (0, 2, 1)), 8.0),
+    "floyd": (((1, 0, 7), (-1, 1, 3), (0, 1, 5), (1, 1, 1)), 16.0),
+    "none": ((), 1.0),
+}
+_KERNEL = _KERNELS["atkinson"][0]
 _PALETTE_RGB = tuple(
     tuple(EINK_4COLOR_PALETTE[index * 3:index * 3 + 3]) for index in range(4)
 )
 _ALLOWED_3 = (0, 1, 3)
 _ALLOWED_4 = (0, 1, 2, 3)
+
+
+def normalize_algo(algo: str | None) -> str:
+    """Map client-side aliases onto the three supported backends."""
+    if not algo:
+        return "atkinson"
+    key = str(algo).strip().lower().replace("-", "_")
+    if key in ("floyd", "floyd_steinberg", "floydsteinberg", "fs"):
+        return "floyd"
+    if key in ("none", "off", "threshold", "solid"):
+        return "none"
+    return "atkinson"
 
 
 def _load_lib() -> ctypes.CDLL:
@@ -76,11 +94,18 @@ def _try_load_lib() -> ctypes.CDLL | None:
 
 
 def _python_atkinson_bw(gray: Image.Image) -> Image.Image:
+    return _python_diffuse_bw(gray)
+
+
+def _python_diffuse_bw(
+    gray: Image.Image,
+    kernel: tuple[tuple[int, int, int], ...] = _KERNEL,
+    divisor: float = 8.0,
+) -> Image.Image:
     src = gray.convert("L")
     width, height = src.size
     data = [float(value) for value in src.tobytes()]
     out = bytearray(width * height)
-    kernel = _KERNEL
     for y in range(height):
         row = y * width
         for x in range(width):
@@ -96,7 +121,7 @@ def _python_atkinson_bw(gray: Image.Image) -> Image.Image:
                 ny = y + dy
                 if 0 <= nx < width and 0 <= ny < height:
                     npos = ny * width + nx
-                    value = data[npos] + error * (weight / 8.0)
+                    value = data[npos] + error * (weight / divisor)
                     if value < 0.0:
                         value = 0.0
                     elif value > 255.0:
@@ -106,13 +131,21 @@ def _python_atkinson_bw(gray: Image.Image) -> Image.Image:
 
 
 def _python_atkinson_palette(rgb: Image.Image, colors: int) -> Image.Image:
+    return _python_diffuse_palette(rgb, colors)
+
+
+def _python_diffuse_palette(
+    rgb: Image.Image,
+    colors: int,
+    kernel: tuple[tuple[int, int, int], ...] = _KERNEL,
+    divisor: float = 8.0,
+) -> Image.Image:
     if colors not in (3, 4):
-        raise ValueError("palette Atkinson dithering supports only 3 or 4 colors")
+        raise ValueError("palette dithering supports only 3 or 4 colors")
     src = rgb.convert("RGB")
     width, height = src.size
     data = [float(value) for value in src.tobytes()]
     out = bytearray(width * height)
-    kernel = _KERNEL
     palette = _PALETTE_RGB
     allowed = _ALLOWED_3 if colors == 3 else _ALLOWED_4
     for y in range(height):
@@ -146,7 +179,7 @@ def _python_atkinson_palette(rgb: Image.Image, colors: int) -> Image.Image:
                 ny = y + dy
                 if 0 <= nx < width and 0 <= ny < height:
                     nbase = (ny * width + nx) * 3
-                    factor = weight / 8.0
+                    factor = weight / divisor
                     value = data[nbase] + err_r * factor
                     data[nbase] = 0.0 if value < 0.0 else 255.0 if value > 255.0 else value
                     value = data[nbase + 1] + err_g * factor
@@ -205,3 +238,24 @@ def atkinson_palette(rgb: Image.Image, colors: int) -> Image.Image:
     out = Image.frombytes("P", (w, h), out_buf.raw)
     out.putpalette(EINK_4COLOR_PALETTE + [0] * (768 - len(EINK_4COLOR_PALETTE)))
     return out
+
+
+def dither_bw(gray: Image.Image, algo: str | None = "atkinson") -> Image.Image:
+    """1-bit output using the requested algorithm.
+
+    "atkinson" keeps the optional native fast path; "floyd" and "none" are pure Python.
+    """
+    name = normalize_algo(algo)
+    if name == "atkinson":
+        return atkinson_bw(gray)
+    kernel, divisor = _KERNELS[name]
+    return _python_diffuse_bw(gray, kernel, divisor)
+
+
+def dither_palette(rgb: Image.Image, colors: int, algo: str | None = "atkinson") -> Image.Image:
+    """3- or 4-colour output using the requested algorithm."""
+    name = normalize_algo(algo)
+    if name == "atkinson":
+        return atkinson_palette(rgb, colors)
+    kernel, divisor = _KERNELS[name]
+    return _python_diffuse_palette(rgb, colors, kernel, divisor)

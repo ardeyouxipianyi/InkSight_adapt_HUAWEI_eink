@@ -48,6 +48,30 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _render_opts_from(
+    dither,
+    contrast,
+    brightness,
+    saturation,
+    cfg: Optional[dict] = None,
+) -> dict:
+    """Resolve image pipeline options: explicit query params win over the stored device settings."""
+    stored = cfg or {}
+
+    def pick(value, key, default):
+        if value is not None:
+            return value
+        stored_value = stored.get(key)
+        return default if stored_value is None else stored_value
+
+    return {
+        "dither": pick(dither, "dither_algo", "atkinson"),
+        "contrast": float(pick(contrast, "contrast", 1.0)),
+        "brightness": float(pick(brightness, "brightness", 1.0)),
+        "saturation": float(pick(saturation, "saturation", 1.0)),
+    }
+
+
 def _configured_refresh_minutes(config: Optional[dict]) -> int:
     refresh_minutes_raw = config.get("refresh_interval") if config else DEFAULT_REFRESH_INTERVAL
     try:
@@ -78,6 +102,16 @@ async def render(
         cfg = await get_active_config(mac, log_load=False)
         configured_refresh_minutes = _configured_refresh_minutes(cfg)
         owner = await get_device_owner(mac)
+
+    # The firmware does not send w/h, so fall back to the screen size stored in the
+    # device config (屏幕设置 → 屏幕尺寸) and finally to the 4.2" default.
+    if params.w is None:
+        params.w = int((cfg or {}).get("screen_width") or 0) or SCREEN_WIDTH
+    if params.h is None:
+        params.h = int((cfg or {}).get("screen_height") or 0) or SCREEN_HEIGHT
+    render_opts = _render_opts_from(
+        params.dither_algo, params.contrast, params.brightness, params.saturation, cfg
+    )
 
     start_time = time.time()
     force_next = params.next_mode == 1
@@ -182,6 +216,7 @@ async def render(
             force_next=force_next,
             skip_cache=skip_cache_for_this_render,
             colors=params.colors,
+            render_opts=render_opts,
         )
 
         if img.size != (params.w, params.h):
@@ -312,6 +347,10 @@ async def preview(
     no_cache: Optional[int] = Query(default=None),
     intent: Optional[int] = Query(default=None),
     colors: int = Query(default=2, ge=2, le=4),
+    dither_algo: Optional[str] = Query(default=None, max_length=32, description="Image dithering: atkinson / floyd / none"),
+    contrast: Optional[float] = Query(default=None, ge=0.1, le=3.0),
+    brightness: Optional[float] = Query(default=None, ge=0.1, le=3.0),
+    saturation: Optional[float] = Query(default=None, ge=0.0, le=3.0),
     ui_language: Optional[str] = Query(default=None, description="Preview only: zh|en, overrides device mode_language"),
     x_device_token: Optional[str] = Header(default=None),
     x_inksight_llm_api_key: Optional[str] = Header(default=None),
@@ -353,6 +392,7 @@ async def preview(
             persona,
             screen_w=w,
             screen_h=h,
+            render_opts=_render_opts_from(dither_algo, contrast, brightness, saturation),
             skip_cache=(no_cache == 1),
             preview_city_override=(city_override.strip() if city_override else None),
             preview_mode_override=parsed_mode_override,
@@ -470,6 +510,10 @@ async def preview_stream(
     h: int = Query(default=SCREEN_HEIGHT, ge=100, le=1200),
     no_cache: Optional[int] = Query(default=None),
     colors: int = Query(default=2, ge=2, le=4),
+    dither_algo: Optional[str] = Query(default=None, max_length=32, description="Image dithering: atkinson / floyd / none"),
+    contrast: Optional[float] = Query(default=None, ge=0.1, le=3.0),
+    brightness: Optional[float] = Query(default=None, ge=0.1, le=3.0),
+    saturation: Optional[float] = Query(default=None, ge=0.0, le=3.0),
     ui_language: Optional[str] = Query(default=None, description="Preview only: zh|en, overrides device mode_language"),
     x_device_token: Optional[str] = Header(default=None),
     x_inksight_llm_api_key: Optional[str] = Header(default=None),
@@ -512,6 +556,7 @@ async def preview_stream(
                 persona,
                 screen_w=w,
                 screen_h=h,
+                render_opts=_render_opts_from(dither_algo, contrast, brightness, saturation),
                 skip_cache=(no_cache == 1),
                 preview_city_override=(city_override.strip() if city_override else None),
                 preview_mode_override=parsed_mode_override,
