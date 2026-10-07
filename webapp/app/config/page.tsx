@@ -788,6 +788,15 @@ function ConfigPageInner() {
   const [previewColors, setPreviewColors] = useState(2);
   const [previewWidth, setPreviewWidth] = useState(400);
   const [previewHeight, setPreviewHeight] = useState(300);
+  // 屏幕设置：设备级渲染参数（与固件从 /api/config 读取的键同名）
+  const [ditherAlgo, setDitherAlgo] = useState("atkinson");
+  const [contrast, setContrast] = useState(1.0);
+  const [brightness, setBrightness] = useState(1.0);
+  const [saturation, setSaturation] = useState(1.0);
+  const [inkScreen, setInkScreen] = useState("A1");
+  const [wifiList, setWifiList] = useState<{ ssid: string; pass: string }[]>([]);
+  const [newSsid, setNewSsid] = useState("");
+  const [newPass, setNewPass] = useState("");
   const [previewNoCacheOnce, setPreviewNoCacheOnce] = useState(false);
   const [previewCacheHit, setPreviewCacheHit] = useState<boolean | null>(null);
   const [previewLlmStatus, setPreviewLlmStatus] = useState<string | null>(null);
@@ -1099,6 +1108,18 @@ function ConfigPageInner() {
         if (cfg.modes?.length) setSelectedModes(new Set(cfg.modes.map((m) => m.toUpperCase())));
         if (cfg.refreshStrategy || cfg.refresh_strategy) setStrategy((cfg.refreshStrategy || cfg.refresh_strategy) as string);
         if (cfg.refreshInterval || cfg.refresh_minutes) setRefreshMin((cfg.refreshInterval || cfg.refresh_minutes) as number);
+        const rawCfg = cfg as Record<string, unknown>;
+        if (rawCfg.screen_width) setPreviewWidth(Number(rawCfg.screen_width));
+        if (rawCfg.screen_height) setPreviewHeight(Number(rawCfg.screen_height));
+        if (typeof rawCfg.dither_algo === "string" && rawCfg.dither_algo) setDitherAlgo(rawCfg.dither_algo);
+        if (typeof rawCfg.contrast === "number") setContrast(rawCfg.contrast);
+        if (typeof rawCfg.brightness === "number") setBrightness(rawCfg.brightness);
+        if (typeof rawCfg.saturation === "number") setSaturation(rawCfg.saturation);
+        const cfgInkScreen = rawCfg.inkScreen || rawCfg.ink_screen;
+        if (typeof cfgInkScreen === "string" && cfgInkScreen) setInkScreen(cfgInkScreen);
+        if (Array.isArray(rawCfg.wifi_list)) {
+          setWifiList(rawCfg.wifi_list as { ssid: string; pass: string }[]);
+        }
         applyGlobalLocation(extractLocationValue(cfg as Record<string, unknown>));
         setModeLanguage((cfg as Record<string, unknown>).modeLanguage as string || (cfg as Record<string, unknown>).mode_language as string || "zh");
         if (cfg.contentTone || cfg.content_tone) setContentTone(normalizeTone(cfg.contentTone || cfg.content_tone));
@@ -1359,6 +1380,14 @@ function ConfigPageInner() {
         is_focus_listening: isFocusListening,
         always_active: alwaysActive,
         timeSlotRules: timeSlotRules,
+        screen_width: previewWidth,
+        screen_height: previewHeight,
+        dither_algo: ditherAlgo,
+        contrast,
+        brightness,
+        saturation,
+        inkScreen,
+        wifiList,
       };
       const res = await fetch("/api/config", {
         method: "POST",
@@ -1423,6 +1452,14 @@ function ConfigPageInner() {
         is_focus_listening: isFocusListening,
         always_active: alwaysActive,
         timeSlotRules: timeSlotRules,
+        screen_width: previewWidth,
+        screen_height: previewHeight,
+        dither_algo: ditherAlgo,
+        contrast,
+        brightness,
+        saturation,
+        inkScreen,
+        wifiList,
       };
       const res = await fetch("/api/config", {
         method: "POST",
@@ -1484,6 +1521,10 @@ function ConfigPageInner() {
       if (previewColors > 2) params.set("colors", String(previewColors));
       params.set("w", String(previewWidth));
       params.set("h", String(previewHeight));
+      if (ditherAlgo && ditherAlgo !== "floyd_steinberg") params.set("dither_algo", ditherAlgo);
+      if (contrast !== 1.0) params.set("contrast", String(contrast));
+      if (brightness !== 1.0) params.set("brightness", String(brightness));
+      if (saturation !== 1.0) params.set("saturation", String(saturation));
       if (forceFresh) params.set("no_cache", "1");
       return { m, params, consumeNoCacheOnce };
     }
@@ -1545,9 +1586,13 @@ function ConfigPageInner() {
     if (previewColors > 2) params.set("colors", String(previewColors));
     params.set("w", String(previewWidth));
     params.set("h", String(previewHeight));
+    if (ditherAlgo && ditherAlgo !== "floyd_steinberg") params.set("dither_algo", ditherAlgo);
+    if (contrast !== 1.0) params.set("contrast", String(contrast));
+    if (brightness !== 1.0) params.set("brightness", String(brightness));
+    if (saturation !== 1.0) params.set("saturation", String(saturation));
     if (forceFresh || locationChanged || hasModeOverride) params.set("no_cache", "1");
     return { m, params, consumeNoCacheOnce };
-  }, [config, currentLocation, mac, memoText, modeOverrides, previewColors, previewWidth, previewHeight, previewMode, previewNoCacheOnce, sanitizeModeOverride]);
+  }, [config, currentLocation, mac, memoText, modeOverrides, previewColors, previewWidth, previewHeight, previewMode, previewNoCacheOnce, sanitizeModeOverride, ditherAlgo, contrast, brightness, saturation]);
 
   const ownerUsername = useMemo(
     () => deviceMembers.find((member) => member.role === "owner")?.username || "",
@@ -2245,6 +2290,14 @@ function ConfigPageInner() {
         is_focus_listening: isFocusListening,
         always_active: alwaysActive,
         timeSlotRules,
+        screen_width: previewWidth,
+        screen_height: previewHeight,
+        dither_algo: ditherAlgo,
+        contrast,
+        brightness,
+        saturation,
+        inkScreen,
+        wifiList,
       };
       const res = await fetch("/api/config", {
         method: "POST",
@@ -2774,6 +2827,147 @@ function ConfigPageInner() {
                       </Button>
                     }
                   />
+                  <Card className="mt-6">
+                    <CardHeader>
+                      <CardTitle>{tr("屏幕设置", "Screen Settings")}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-4">
+                        <Field label={tr("屏幕尺寸", "Screen Size")}>
+                          <select
+                            className="w-full h-9 px-2.5 text-xs rounded-sm border border-ink/20 bg-white"
+                            value={`${previewWidth}x${previewHeight}`}
+                            onChange={(e) => {
+                              const [w, h] = e.target.value.split("x").map(Number);
+                              setPreviewWidth(w);
+                              setPreviewHeight(h);
+                            }}
+                          >
+                            <option value="400x300">400 x 300 (3.98寸~4.2寸)</option>
+                            <option value="768x552">768 x 552 (3.98寸 华为)</option>
+                            <option value="800x480">800 x 480 (7.5寸)</option>
+                            <option value="600x448">600 x 448 (5.83寸)</option>
+                            <option value="250x122">250 x 122 (2.13寸)</option>
+                            <option value="296x128">296 x 128 (2.9寸)</option>
+                          </select>
+                        </Field>
+                        <Field label={tr("图像渲染算法", "Dithering Algorithm")}>
+                          <select
+                            className="w-full h-9 px-2.5 text-xs rounded-sm border border-ink/20 bg-white"
+                            value={ditherAlgo}
+                            onChange={(e) => setDitherAlgo(e.target.value)}
+                          >
+                            <option value="atkinson">{tr("Atkinson (推荐, 平滑过渡)", "Atkinson (recommended, smooth)")}</option>
+                            <option value="floyd">{tr("Floyd-Steinberg (细节保留)", "Floyd-Steinberg (detail)")}</option>
+                            <option value="none">{tr("无 (仅二值化)", "None (threshold only)")}</option>
+                          </select>
+                        </Field>
+                        <Field label={tr("屏幕驱动规格", "Screen hardware type")}>
+                          <select
+                            className="w-full h-9 px-2.5 text-xs rounded-sm border border-ink/20 bg-white"
+                            value={inkScreen}
+                            onChange={(e) => setInkScreen(e.target.value)}
+                          >
+                            <option value="A1">{tr("A1 原版彩显屏 (默认)", "A1 original colour panel (default)")}</option>
+                            <option value="A0">{tr("A0 兼容版彩显屏", "A0 compatible colour panel")}</option>
+                          </select>
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <Field label={tr("对比度", "Contrast")}>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={contrast}
+                            onChange={(e) => setContrast(parseFloat(e.target.value))}
+                            className="w-full cursor-pointer"
+                          />
+                          <div className="text-sm text-center text-ink-light mt-1">{contrast.toFixed(1)}</div>
+                        </Field>
+                        <Field label={tr("亮度", "Brightness")}>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={brightness}
+                            onChange={(e) => setBrightness(parseFloat(e.target.value))}
+                            className="w-full cursor-pointer"
+                          />
+                          <div className="text-sm text-center text-ink-light mt-1">{brightness.toFixed(1)}</div>
+                        </Field>
+                        <Field label={tr("饱和度", "Saturation")}>
+                          <input
+                            type="range"
+                            min="0.0"
+                            max="2.0"
+                            step="0.1"
+                            value={saturation}
+                            onChange={(e) => setSaturation(parseFloat(e.target.value))}
+                            className="w-full cursor-pointer"
+                          />
+                          <div className="text-sm text-center text-ink-light mt-1">{saturation.toFixed(1)}</div>
+                        </Field>
+                      </div>
+                      <div className="pt-3 border-t border-ink/10">
+                        <div className="text-sm font-semibold text-ink mb-1">{tr("备用 WiFi 热点接力", "Backup WiFi hotspots")}</div>
+                        <p className="text-xs text-ink-light mb-2">
+                          {tr("主热点断开或无法连接时，设备会依次尝试以下备用热点（最多 5 组）。", "When the primary network is unreachable the device falls back to these hotspots (up to 5).")}
+                        </p>
+                        {wifiList.length > 0 && (
+                          <div className="space-y-1 mb-2">
+                            {wifiList.map((item, index) => (
+                              <div
+                                key={`${item.ssid}-${index}`}
+                                className="flex items-center justify-between gap-2 rounded-sm border border-ink/10 px-2 py-1"
+                              >
+                                <span className="text-xs text-ink truncate">{item.ssid}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setWifiList((prev) => prev.filter((_, i) => i !== index))}
+                                  className="text-xs text-ink-light hover:text-ink shrink-0"
+                                >
+                                  {tr("移除", "Remove")}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={newSsid}
+                            onChange={(e) => setNewSsid(e.target.value)}
+                            placeholder={tr("热点名称 (SSID)", "SSID")}
+                            className="h-9 px-2.5 text-xs rounded-sm border border-ink/20 bg-white"
+                          />
+                          <input
+                            type="text"
+                            value={newPass}
+                            onChange={(e) => setNewPass(e.target.value)}
+                            placeholder={tr("密码", "Password")}
+                            className="h-9 px-2.5 text-xs rounded-sm border border-ink/20 bg-white"
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => {
+                            const ssid = newSsid.trim();
+                            if (!ssid) return;
+                            setWifiList((prev) => (prev.length >= 5 ? prev : [...prev, { ssid, pass: newPass }]));
+                            setNewSsid("");
+                            setNewPass("");
+                          }}
+                        >
+                          {tr("添加备用 WiFi", "Add backup WiFi")}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                   </div>
                 </div>
 

@@ -1746,6 +1746,14 @@ def _row_to_dict(row, columns) -> dict:
         mo = {}
     d["mode_overrides"] = mo
     d["modeOverrides"] = mo
+    wl_raw = d.get("wifi_list", "[]")
+    try:
+        wl = json.loads(wl_raw) if isinstance(wl_raw, str) else wl_raw
+    except (json.JSONDecodeError, TypeError):
+        wl = []
+    d["wifi_list"] = wl if isinstance(wl, list) else []
+    d["wifiList"] = d["wifi_list"]
+    d["inkScreen"] = d.get("ink_screen") or "A1"
     d["focus_listening"] = int(d.get("focus_listening", 0) or 0)
     d["is_focus_listening"] = bool(d["focus_listening"])
     d["always_active"] = int(d.get("always_active", 0) or 0)
