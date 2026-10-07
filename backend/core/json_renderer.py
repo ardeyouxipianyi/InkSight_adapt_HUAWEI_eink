@@ -1307,9 +1307,14 @@ def render_json_mode(
 
     sb = layout.get("status_bar", {})
     ft_layout = layout.get("footer", {})
+    # Modes may opt out of the chrome entirely (e.g. the full-bleed photo frame).
+    status_bar_hidden = bool(sb.get("hidden"))
+    footer_hidden = bool(ft_layout.get("hidden"))
     status_bar_pct = 0.10 if screen_h < 200 else 0.12
     # 296×128：旧 draw_status_bar 横线在 int(h*0.11)（约 14px）；若用 int(h*0.10)+2 与之相同，视觉上“没下移”
-    if screen_h <= 128:
+    if status_bar_hidden:
+        status_bar_bottom = 0
+    elif screen_h <= 128:
         status_bar_bottom = int(screen_h * 0.11) + 2
     else:
         status_bar_bottom = int(screen_h * status_bar_pct)
@@ -1331,7 +1336,8 @@ def render_json_mode(
     )
     if screen_h <= 128:
         _dsb_kw["separator_y"] = status_bar_bottom
-    draw_status_bar(**_dsb_kw)
+    if not status_bar_hidden:
+        draw_status_bar(**_dsb_kw)
 
     scale = screen_w / 400.0
     if scale < 0.92:
@@ -1339,9 +1345,9 @@ def render_json_mode(
     min_scale = min(scale, screen_h / 300.0)
     if min_scale < 0.65:
         min_scale = 0.65
-    footer_height = int(ft_layout.get("height", 30) * min_scale)
+    footer_height = 0 if footer_hidden else int(ft_layout.get("height", 30) * min_scale)
     # 2.9"（128px 高等）：页脚要容纳图标 + 左右文案，缩放后仍须足够高度，否则会贴底
-    if screen_h <= 128:
+    if screen_h <= 128 and not footer_hidden:
         footer_height = max(footer_height, 24)
     footer_top = screen_h - footer_height
     # 页脚顶部分隔线相对「内容上边界」下移 2–3px，与 draw_footer(y_line) 一致
@@ -1433,17 +1439,18 @@ def render_json_mode(
     _attr_font_size = ft.get("font_size")
     if _attr_font_size is not None:
         _attr_font_size = int(_attr_font_size * scale)
-    draw_footer(
-        draw, img, label, attribution,
-        mode_id=mode_id,
-        weather_code=content.get("today_code", content.get("code")),
-        line_width=ft.get("line_width", 1),
-        dashed=ft.get("dashed", False),
-        attr_font_size=_attr_font_size,
-        screen_w=screen_w, screen_h=screen_h,
-        colors=colors,
-        footer_top=footer_top,
-    )
+    if not footer_hidden:
+        draw_footer(
+            draw, img, label, attribution,
+            mode_id=mode_id,
+            weather_code=content.get("today_code", content.get("code")),
+            line_width=ft.get("line_width", 1),
+            dashed=ft.get("dashed", False),
+            attr_font_size=_attr_font_size,
+            screen_w=screen_w, screen_h=screen_h,
+            colors=colors,
+            footer_top=footer_top,
+        )
 
     return img
 
@@ -2588,10 +2595,15 @@ def _render_image(ctx: RenderContext, block: dict) -> None:
     image_url = str(ctx.get_field(field_name) or "")
     if not image_url:
         return
-    width = int(block.get("width", 220) * ctx.scale)
-    height = int(block.get("height", 140) * ctx.scale)
-    x = int(block.get("x", (ctx.screen_w - width) // 2))
-    y = int(block.get("y", ctx.y))
+    if block.get("full_bleed"):
+        # Fill the whole canvas regardless of screen size (no chrome around it).
+        width, height = ctx.screen_w, ctx.screen_h
+        x, y = 0, 0
+    else:
+        width = int(block.get("width", 220) * ctx.scale)
+        height = int(block.get("height", 140) * ctx.scale)
+        x = int(block.get("x", (ctx.screen_w - width) // 2))
+        y = int(block.get("y", ctx.y))
     fit = str(block.get("fit", "fill") or "fill")
     align_x = str(block.get("align_x", "center") or "center")
     align_y = str(block.get("align_y", "center") or "center")
