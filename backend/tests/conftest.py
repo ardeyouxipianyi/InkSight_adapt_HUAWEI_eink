@@ -2,6 +2,7 @@
 Shared pytest fixtures for InkSight unit tests.
 """
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,11 @@ os.environ.setdefault("MOONSHOT_API_KEY", "sk-test-dummy-key-002")
 
 def pytest_sessionstart(session):
     """Build the native dithering library before tests import renderers."""
+    # The build script produces an ELF .so while the runtime loads a .dll on
+    # Windows, so the optional native library is never used there; skip the
+    # build instead of failing the whole session on a missing g++.
+    if platform.system() == "Windows":
+        return
     native_lib = BACKEND_ROOT / "core" / "native" / "libeink_dither.so"
     if native_lib.exists():
         return

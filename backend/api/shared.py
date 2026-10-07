@@ -140,7 +140,11 @@ class _NoopLimiter:
 
 
 try:
-    limiter = Limiter(key_func=_rate_limit_key, storage_uri="memory://")
+    # slowapi reads ".env" via starlette's Config, which opens the file with the
+    # platform default encoding (GBK on zh-CN Windows) and fails on UTF-8 content.
+    # No rate-limit setting is read from that file, so point it at a path that
+    # does not exist to keep the limiter working on non-UTF-8 locales.
+    limiter = Limiter(key_func=_rate_limit_key, storage_uri="memory://", config_filename="")
 except Exception as exc:  # pragma: no cover - depends on optional runtime dependency
     logger.warning("Rate limiter disabled due to init error: %s", exc)
     limiter = _NoopLimiter()

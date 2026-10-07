@@ -8,40 +8,49 @@ from pathlib import Path
 from typing import Any
 
 
-RAW_BASE = "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/json_original/json-sentence"
+# Upstream restructured its repo: the old per-book JSON files were replaced by
+# full JSONL exports under full_line_jsonl/full/<正序|乱序>/.
+RAW_BASE = "https://raw.githubusercontent.com/KyleBing/english-vocabulary/master/full_line_jsonl/full/正序"
+
 OUT_DIR = Path(__file__).resolve().parents[1] / "core" / "vocab_data"
 
 DECKS: dict[str, dict[str, Any]] = {
     "primary_en": {
         "difficulty": 1,
         "sources": [
-            "PEPXiaoXue3_1.json",
-            "PEPXiaoXue3_2.json",
-            "PEPXiaoXue4_1.json",
-            "PEPXiaoXue4_2.json",
-            "PEPXiaoXue5_1.json",
-            "PEPXiaoXue5_2.json",
-            "PEPXiaoXue6_1.json",
-            "PEPXiaoXue6_2.json",
+            "人教小学三年级.jsonl",
+            "人教小学四年级.jsonl",
+            "人教小学五年级.jsonl",
+            "人教小学六年级.jsonl",
         ],
     },
-    "middle_school_en": {"difficulty": 2, "sources": ["ChuZhong_2.json", "ChuZhong_3.json"]},
-    "high_school_en": {"difficulty": 3, "sources": ["GaoZhong_2.json", "GaoZhong_3.json"]},
-    "cet4_en": {"difficulty": 4, "sources": ["CET4_1.json", "CET4_2.json", "CET4_3.json"]},
-    "cet6_en": {"difficulty": 5, "sources": ["CET6_1.json", "CET6_2.json", "CET6_3.json"]},
-    "ielts_en": {"difficulty": 6, "sources": ["IELTS_2.json", "IELTS_3.json"]},
-    "toefl_en": {"difficulty": 7, "sources": ["TOEFL_2.json", "TOEFL_3.json"]},
+    "middle_school_en": {"difficulty": 2, "sources": ["初中.jsonl"]},
+    "high_school_en": {"difficulty": 3, "sources": ["高中.jsonl"]},
+    "cet4_en": {"difficulty": 4, "sources": ["四级.jsonl"]},
+    "cet6_en": {"difficulty": 5, "sources": ["六级.jsonl"]},
+    "ielts_en": {"difficulty": 6, "sources": ["雅思.jsonl"]},
+    "toefl_en": {"difficulty": 7, "sources": ["托福.jsonl"]},
 }
 
 
 def fetch_source(name: str) -> list[dict[str, Any]]:
-    url = f"{RAW_BASE}/{urllib.parse.quote(name)}"
-    with urllib.request.urlopen(url, timeout=60) as response:
+    base = urllib.parse.quote(RAW_BASE, safe=":/")
+    url = f"{base}/{urllib.parse.quote(name)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "InkSight-VocabImport/1.0"})
+    with urllib.request.urlopen(req, timeout=180) as response:
         payload = response.read().decode("utf-8")
-    data = json.loads(payload)
-    if not isinstance(data, list):
-        raise ValueError(f"{name}: expected list, got {type(data).__name__}")
-    return [item for item in data if isinstance(item, dict)]
+    items: list[dict[str, Any]] = []
+    for line in payload.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            items.append(item)
+    return items
 
 
 def clean_text(value: Any) -> str:
@@ -55,45 +64,66 @@ def normalize_phonetic(value: Any) -> str:
     return f"/{text}/" if text else ""
 
 
-def pick_definition(item: dict[str, Any]) -> str:
-    translations = item.get("translations")
+def _word_object(item: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap the nested {"content": {"word": {...}}} envelope used upstream."""
+    word_obj = item.get("content")
+    if isinstance(word_obj, dict):
+        word_obj = word_obj.get("word")
+    return word_obj if isinstance(word_obj, dict) else {}
+
+
+def _word_content(item: dict[str, Any]) -> dict[str, Any]:
+    content = _word_object(item).get("content")
+    return content if isinstance(content, dict) else {}
+
+
+def _word_head(item: dict[str, Any]) -> str:
+    head = clean_text(_word_object(item).get("wordHead"))
+    return head or clean_text(item.get("headWord"))
+
+
+def pick_definition(content: dict[str, Any]) -> str:
+    translations = content.get("trans")
     parts: list[str] = []
     if isinstance(translations, list):
         for translation in translations[:3]:
             if not isinstance(translation, dict):
                 continue
-            body = clean_text(translation.get("translation"))
-            pos = clean_text(translation.get("type"))
+            body = clean_text(translation.get("tranCn"))
+            pos = clean_text(translation.get("pos"))
             if not body:
                 continue
             parts.append(f"{pos}. {body}" if pos else body)
     return "；".join(parts)
 
 
-def pick_example(item: dict[str, Any]) -> str:
-    sentences = item.get("sentences")
-    if isinstance(sentences, list):
-        for sentence in sentences:
-            if not isinstance(sentence, dict):
-                continue
-            text = clean_text(sentence.get("sentence"))
-            if text:
-                return text
+def pick_example(content: dict[str, Any]) -> str:
+    sentence = content.get("sentence")
+    if isinstance(sentence, dict):
+        sentences = sentence.get("sentences")
+        if isinstance(sentences, list):
+            for entry in sentences:
+                if not isinstance(entry, dict):
+                    continue
+                text = clean_text(entry.get("sContent"))
+                if text:
+                    return text
     return ""
 
 
 def convert_item(deck_id: str, difficulty: int, item: dict[str, Any]) -> dict[str, Any] | None:
-    word = clean_text(item.get("word"))
-    definition = pick_definition(item)
+    word = _word_head(item)
+    content = _word_content(item)
+    definition = pick_definition(content)
     if not word or not definition:
         return None
-    phonetic = normalize_phonetic(item.get("us") or item.get("uk"))
+    phonetic = normalize_phonetic(content.get("usphone") or content.get("ukphone"))
     return {
         "deck_id": deck_id,
         "word": word,
         "phonetic": phonetic,
         "definition": definition,
-        "example": pick_example(item),
+        "example": pick_example(content),
         "difficulty": difficulty,
     }
 

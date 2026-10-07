@@ -32,6 +32,10 @@ FONT_FAMILIES: dict[str, list[str]] = {
     "Inter": [
         "Inter_24pt-Medium.ttf",
     ],
+    # Used by VOCAB_REVIEW / WORD_OF_THE_DAY for IPA phonetics.
+    "Gentium+Plus": [
+        "GentiumPlus-Regular.ttf",
+    ],
 }
 
 BITMAP_FONT_URLS: dict[str, str] = {

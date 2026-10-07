@@ -579,6 +579,7 @@ async def create_custom_mode(body: dict, request: Request, user_id: int = Depend
     # Legacy path: no mac means file-based custom mode.
     if not mac:
         file_path = Path(CUSTOM_JSON_DIR) / f"{mode_id.lower()}.json"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(jsonlib.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
         registry.unregister_custom(mode_id)
         loaded = registry.load_json_mode(str(file_path), source="custom")
