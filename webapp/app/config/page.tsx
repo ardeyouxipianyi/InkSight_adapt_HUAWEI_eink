@@ -15,6 +15,8 @@ import { Field, StatCard } from "@/components/config/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import Cropper, { ReactCropperElement } from "react-cropper";
+import "cropperjs/dist/cropper.css";
 import {
   Settings,
   Sliders,
@@ -28,6 +30,7 @@ import {
   Monitor,
   X,
   Users,
+  RotateCw,
 } from "lucide-react";
 import { authHeaders, fetchCurrentUser, onAuthChanged } from "@/lib/auth";
 import { localeFromPathname, withLocalePath } from "@/lib/i18n";
@@ -807,6 +810,11 @@ function ConfigPageInner() {
   const [adaptiveModal, setAdaptiveModal] = useState<{ action: "preview" | "apply" } | null>(null);
   const [adaptiveImageUrls, setAdaptiveImageUrls] = useState<string[]>([]);
   const [adaptiveUploading2, setAdaptiveUploading2] = useState(false);
+  // 上传前先裁剪：把选中的文件读成 data URL 交给 cropper
+  const cropperRef = useRef<ReactCropperElement>(null);
+  const [cropperDataUrl, setCropperDataUrl] = useState<string | null>(null);
+  const [cropperFile, setCropperFile] = useState<File | null>(null);
+  const [cropperUploading, setCropperUploading] = useState(false);
 
   // 参数弹窗（与 /preview 页面保持一致）
   const [paramModal, setParamModal] = useState<ParamModalState | null>(null);
@@ -2509,25 +2517,113 @@ function ConfigPageInner() {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={async (e) => {
+        onChange={(e) => {
           const f = e.target.files?.[0] || null;
           e.currentTarget.value = "";
           if (!f) return;
-          setAdaptiveUploading2(true);
-          try {
-            const url = await uploadLocalImage(f);
-            setAdaptiveImageUrls((prev) => {
-              if (prev.length >= 6) return prev;
-              return [...prev, url];
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : tr("请选择一张本地图片", "Please choose a local image");
-            showToast(msg, "error");
-          } finally {
-            setAdaptiveUploading2(false);
-          }
+          // 先进入裁剪，确认后才真正上传
+          const reader = new FileReader();
+          reader.onload = () => {
+            setCropperDataUrl(reader.result as string);
+            setCropperFile(f);
+          };
+          reader.readAsDataURL(f);
         }}
       />
+      <Dialog
+        open={!!cropperDataUrl}
+        onClose={() => {
+          setCropperDataUrl(null);
+          setCropperFile(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader
+            onClose={() => {
+              setCropperDataUrl(null);
+              setCropperFile(null);
+            }}
+          >
+            <DialogTitle>{tr("裁剪图片", "Crop Image")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Cropper
+              src={cropperDataUrl || undefined}
+              style={{ height: 400, width: "100%" }}
+              aspectRatio={previewWidth / previewHeight}
+              guides={true}
+              ref={cropperRef}
+              viewMode={1}
+            />
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (typeof cropperRef.current?.cropper !== "undefined") {
+                    cropperRef.current.cropper.rotate(90);
+                  }
+                }}
+              >
+                <RotateCw className="w-4 h-4 mr-2" />
+                {tr("旋转 90°", "Rotate 90°")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCropperDataUrl(null);
+                  setCropperFile(null);
+                }}
+              >
+                {tr("取消", "Cancel")}
+              </Button>
+              <Button
+                disabled={cropperUploading}
+                onClick={() => {
+                  if (typeof cropperRef.current?.cropper === "undefined") return;
+                  setCropperUploading(true);
+                  try {
+                    const canvas = cropperRef.current.cropper.getCroppedCanvas({
+                      width: previewWidth,
+                      height: previewHeight,
+                      fillColor: "#fff",
+                    });
+                    canvas.toBlob(
+                      async (blob) => {
+                        if (!blob) {
+                          setCropperUploading(false);
+                          return;
+                        }
+                        const file = new File([blob], cropperFile?.name || "cropped.jpg", {
+                          type: "image/jpeg",
+                        });
+                        try {
+                          const url = await uploadLocalImage(file);
+                          setAdaptiveImageUrls((prev) => (prev.length >= 6 ? prev : [...prev, url]));
+                          setCropperDataUrl(null);
+                          setCropperFile(null);
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : tr("上传失败", "Upload failed");
+                          showToast(msg, "error");
+                        } finally {
+                          setCropperUploading(false);
+                        }
+                      },
+                      "image/jpeg",
+                      0.9,
+                    );
+                  } catch {
+                    setCropperUploading(false);
+                    showToast(tr("裁剪失败", "Crop failed"), "error");
+                  }
+                }}
+              >
+                {cropperUploading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {tr("确认", "Confirm")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-serif text-3xl font-bold text-ink mb-2">{tr("设备配置", "Device Configuration")}</h1>
